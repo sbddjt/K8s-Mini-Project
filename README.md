@@ -4,14 +4,18 @@
 
 ## 🗓️ 프로젝트 개요
 - **진행 기간:** 2026.02.24 ~ 2026.03.13 (약 3주)
-- **팀 구성:** 4 ~ 6인 (성윤, 중훈, June, ...)
+- **팀 구성:** 성윤, 중훈, 현준, 준태
 - **핵심 목표:** 애플리케이션에 CQRS 패턴을 적용하고, K8s 클러스터 환경에 안정적으로 배포 및 운영하기.
+
+<br>
 
 ## 🛠️ Tech Stack
 - **Infrastructure:** Kubernetes, Docker, Docker Hub
 - **Backend:** (사용할 언어/프레임워크 작성, 예: Spring Boot, Node.js)
 - **Database:** (사용할 DB 작성, 예: MySQL, Redis)
 - **Collaboration:** GitHub, Notion, JIRA / Slack
+
+<br>
 
 ## 🎯 핵심 구현 요구사항
 - [ ] **CQRS 패턴 적용:** Command(명령)와 Query(조회)의 책임 분리 및 아키텍처 설계
@@ -20,6 +24,8 @@
 - [ ] **외부 통신 (Service):** LoadBalancer를 활용한 외부 포트 노출
 - [ ] **데이터 영속성 (Volume):** HostPath 등을 활용한 DB 데이터 볼륨 마운트 (경로 확보)
 - [ ] **설정 관리 (Config):** ConfigMap, Secret, Downward API 등을 활용한 유연한 환경 설정
+
+<br>
 
 ## 🌐 포트 및 인프라 컨벤션 (규칙)
 K8s 클러스터 내부 및 포트 포워딩을 위해 아래와 같이 포트를 분배하여 사용합니다. (총 10개 포트 할당)
@@ -34,6 +40,8 @@ K8s 클러스터 내부 및 포트 포워딩을 위해 아래와 같이 포트�
 | ... | ... | ... | ... |
 
 > 💡 **DB Volume Mount Path:** `(사용하는 DB의 실제 저장 경로 작성, 예: /var/lib/mysql)`
+
+<br>
 
 ## 📁 디렉토리 구조
 ```text
