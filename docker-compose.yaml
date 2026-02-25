@@ -18,7 +18,7 @@ services:
     image: redis:alpine
     container_name: mobility-redis
     ports:
-      - "30005:6379" # 이미지 명세 반영
+      - "6379:6379" # 이미지 명세 반영
     networks:
       - mobility-net
 
