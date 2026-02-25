@@ -1,0 +1,83 @@
+{
+  "vehicle": {
+    "vehicle_id": "CAR-1003",
+    "vin": "KICF9AA1001000003",
+    "model": "Kia EV6",
+    "driver": "박소윤",
+    "timestamp_utc": "2026-02-24T07:01:08Z"
+  },
+  "location": {
+    "city": "수원",
+    "coordinates": {
+      "latitude": 37.271408,
+      "longitude": 127.029115
+    },
+    "heading_deg": 267.86,
+    "altitude_m": 11,
+    "gps_accuracy_m": 5.27
+  },
+  "trip": {
+    "state": "DRIVE",
+    "duration_s": 617,
+    "duration_hms": "00:10:17",
+    "speed_kmh": 40.1,
+    "odometer_km": 18670.78,
+    "odometer_delta_km": 0.0208
+  },
+  "battery": {
+    "soc_pct": 92.44,
+    "health_pct": 99.2,
+    "pack_voltage_v": 373.82,
+    "pack_current_a": -0.04,
+    "aux_12v_battery_v": 12.37,
+    "is_charging": false
+  },
+  "temperatures_c": {
+    "cabin": 25.2,
+    "ambient": 16.7,
+    "engine": 55.3,
+    "coolant": 82.4
+  },
+  "dynamics": {
+    "traction": "FWD",
+    "acceleration_mps2": 0.62,
+    "brake_pct": 14.1,
+    "throttle_pct": 19.4,
+    "steering_deg": -8.8,
+    "gear": "D",
+    "driving_mode": "Sport"
+  },
+  "status": {
+    "is_locked": false,
+    "ignition_on": true,
+    "park_brake": false,
+    "door_locked": {
+      "front_left": false,
+      "front_right": false,
+      "rear_left": false,
+      "rear_right": false
+    },
+    "window_position": {
+      "front": "down",
+      "rear": "down"
+    }
+  },
+  "diagnostics": {
+    "warnings": {
+      "abs_warning": false,
+      "esp_warning": false,
+      "tpms_warning": false
+    },
+    "tire_pressure_psi": {
+      "front_left": 33.72,
+      "front_right": 36.2,
+      "rear_left": 33.69,
+      "rear_right": 32.97
+    },
+    "firmware_ver": "CCU-1.6.3",
+    "sensor_health": "good"
+  },
+  "events": [
+    "교차로 대기 중"
+  ]
+}
