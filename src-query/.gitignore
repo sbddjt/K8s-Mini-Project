@@ -1,0 +1,12 @@
+venv/
+.venv/
+**/venv/
+**/.venv/
+__pycache__/
+*.pyc
+.env
+
+# Docker DB data volumes
+mongodb_data/
+redis_data/
+*.log

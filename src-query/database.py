@@ -13,7 +13,7 @@ redis_client = Redis(
     port=int(os.getenv("REDIS_PORT", 6379)),
     db=int(os.getenv("REDIS_DB", 0)),
     password=os.getenv("REDIS_PASSWORD", ""),
-    decode_responses=True
+    decode_responses=True,
     health_check_interval=30
 )
 
@@ -38,3 +38,11 @@ def get_vehicle_telemetry(vehicle_id: str) -> Optional[VehicleTelemetry]:
         data = json.loads(data_str)
         return VehicleTelemetry(**data)
     return None
+
+# database.py 하단에 추가 (임시)
+if __name__ == "__main__":
+    try:
+        if redis_client.ping():
+            print("✅ Redis 연결 성공!")
+    except Exception as e:
+        print(f"❌ Redis 연결 실패: {e}")
