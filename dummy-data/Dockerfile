@@ -1,5 +1,5 @@
 # 1. 베이스 이미지 설정
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 # 2. 환경 변수 최적화
 ENV PYTHONDONTWRITEBYTECODE=1 \
