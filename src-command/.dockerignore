@@ -1,7 +1,20 @@
-venv/
-__pycache__/
-.git/
-.gitignore
+# 1. 도커 빌드 도구 (자기 자신들 제외)
 Dockerfile
 .dockerignore
-docker-compose.yaml
+
+# 2. 파이썬 캐시 및 쓰레기 파일
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# 3. 로컬 가상환경 및 설정
+venv/
+.venv/
+.env
+.vscode/
+.idea/
+
+# 4. 소스 관리 기록
+.git/
+.gitignore
