@@ -57,3 +57,6 @@ def start_consumer():
     finally:
         consumer.close()
         print("Kafka Consumer 종료")
+
+if __name__ == "__main__":
+    start_consumer()

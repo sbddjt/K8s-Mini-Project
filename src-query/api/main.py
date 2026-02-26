@@ -1,12 +1,14 @@
 import os
 import json
+from dotenv import load_dotenv
+# 1. 다른 로컬 모듈(database 등)을 불러오기 전에 가장 먼저 환경 변수를 로드합니다.
+# override=True를 추가하여 .env의 값이 시스템 환경 변수보다 우선하도록 합니다.
+load_dotenv(override=True)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 from database import redis_client
 
-# .env 파일의 환경 변수를 읽어옵니다.
-load_dotenv()
 
 app = FastAPI(title="Connected Car Query API")
 

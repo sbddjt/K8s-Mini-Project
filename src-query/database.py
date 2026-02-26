@@ -5,7 +5,7 @@ from redis import Redis
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-load_dotenv()
+#load_dotenv()
 
 # Redis 클라이언트
 redis_client = Redis(
