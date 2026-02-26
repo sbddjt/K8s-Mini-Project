@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import json
+import os
 
 # DB 및 카프카 연동을 위한 라이브러리
 from pymongo import MongoClient
@@ -9,15 +10,19 @@ from kafka import KafkaProducer
 
 app = FastAPI(title="Connected Car Ingest API")
 
-# 1. 인프라 연결 설정 (Mongo DB, Kafka) - Redis 제거됨
+# 1. 인프라 연결 설정 (Mongo DB, Kafka)
 try:
-    # MongoDB: 전체 이력 저장 (원본 데이터)
-    mongo_client = MongoClient("mongodb://localhost:27017/")
+    # 환경 변수가 있으면 그걸 쓰고, 없으면 로컬호스트 (기본값)을 쓰자.
+    MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
+    KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
+
+    # MongoDB 연결
+    mongo_client = MongoClient(MONGO_URL)
     history_col = mongo_client["car_db"]["telemetry_history"]
 
-    # Kafka: 실시간 스트리밍 (이벤트 발행)
+    # Kafka 연결
     producer = KafkaProducer(
-        bootstrap_servers=['localhost:9092'],
+        bootstrap_servers=[KAFKA_BROKER],
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
 except Exception as e:
