@@ -11,15 +11,15 @@
 
 ## 🛠️ Tech Stack
 - **Infrastructure:** Kubernetes, Docker, Docker Hub
-- **Backend:** (사용할 언어/프레임워크 작성, 예: Spring Boot, Node.js)
-- **Database:** (사용할 DB 작성, 예: MySQL, Redis)
+- **Backend:** (Python, Fast API)
+- **Database:** (MongoDB, Redis)
 - **Collaboration:** GitHub, Notion, JIRA / Slack
 
 <br>
 
 ## 🎯 핵심 구현 요구사항
-- [ ] **CQRS 패턴 적용:** Command(명령)와 Query(조회)의 책임 분리 및 아키텍처 설계
-- [ ] **Dockerizing:** 애플리케이션 이미지 빌드 및 Docker Hub 업로드
+- [x] **CQRS 패턴 적용:** Command(명령)와 Query(조회)의 책임 분리 및 아키텍처 설계
+- [x] **Dockerizing:** 애플리케이션 이미지 빌드 및 Docker Hub 업로드
 - [ ] **K8s 배포 (Deployment):** 작성한 이미지를 기반으로 파드(Pod) 배포
 - [ ] **외부 통신 (Service):** LoadBalancer를 활용한 외부 포트 노출
 - [ ] **데이터 영속성 (Volume):** HostPath 등을 활용한 DB 데이터 볼륨 마운트 (경로 확보)
