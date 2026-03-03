@@ -64,9 +64,4 @@ if __name__ == "__main__":
     
     print(f"🚀 Query API 서버를 시작합니다... (Port: {app_port})")
     
-    uvicorn.run(
-        "api.main:app", 
-        host=app_host, 
-        port=app_port, 
-        reload=True  # 개발 단계에서는 코드 수정 시 자동 재시작
-    )
+    uvicorn.run(app, host=app_host, port=app_port, reload=False)

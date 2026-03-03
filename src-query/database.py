@@ -17,28 +17,6 @@ redis_client = Redis(
     health_check_interval=30
 )
 
-class VehicleTelemetry(BaseModel):
-    """차량 텔레메트리 데이터 모델"""
-    vehicle_id: str
-    vin: str
-    model: str
-    driver: str
-    timestamp: str
-    location: Dict[str, Any]
-    telemetry: Dict[str, Any]
-    status: Dict[str, Any]
-    diagnostics: Dict[str, Any]
-    events: list
-
-def get_vehicle_telemetry(vehicle_id: str) -> Optional[VehicleTelemetry]:
-    """개별 차량 최신 데이터 조회"""
-    key = f"vehicle:{vehicle_id}:latest"
-    data_str = redis_client.get(key)
-    if data_str:
-        data = json.loads(data_str)
-        return VehicleTelemetry(**data)
-    return None
-
 # database.py 하단에 추가 (임시)
 if __name__ == "__main__":
     try:
