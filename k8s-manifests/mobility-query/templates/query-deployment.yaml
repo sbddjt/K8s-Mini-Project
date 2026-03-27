@@ -28,7 +28,8 @@ spec:
           image: "{{ .Values.query.api.image }}"
           imagePullPolicy: Always
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
           resources:
             requests:
               cpu: "100m"
@@ -121,6 +122,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: connected-car-query
+    tier: backend
 spec:
   type: ClusterIP
   selector:
@@ -183,6 +185,9 @@ spec:
         - name: query-consumer
           image: "{{ .Values.query.consumer.image }}"
           imagePullPolicy: Always
+          ports:
+            - name: metrics
+              containerPort: 9102
           command:
             - "python"
             - "-u"
@@ -203,6 +208,8 @@ spec:
                 configMapKeyRef:
                   name: mobility-config
                   key: KAFKA_GROUP_ID_QUERY
+            - name: METRICS_PORT
+              value: "9102"
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:

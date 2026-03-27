@@ -28,7 +28,8 @@ spec:
           image: "{{ .Values.command.api.image }}"
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
           resources:
             requests:
               cpu: "{{ .Values.command.api.hpa.requests.cpu }}"
@@ -63,6 +64,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app: connected-car-command
+    tier: backend
 spec:
   type: ClusterIP
   selector:
@@ -125,6 +127,9 @@ spec:
         - name: command-consumer
           image: "{{ .Values.command.consumer.image }}"
           imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9101
           resources:
             requests:
               cpu: "{{ .Values.command.consumer.hpa.requests.cpu }}"
@@ -141,6 +146,8 @@ spec:
                 configMapKeyRef:
                   name: mobility-config
                   key: KAFKA_GROUP_ID_COMMAND
+            - name: METRICS_PORT
+              value: "9101"
             - name: MONGO_URI
               valueFrom:
                 secretKeyRef:

@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from kafka import KafkaProducer
 from pydantic import BaseModel
+from prometheus_client import Counter, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
 
 
 def _get_env(name: str, default: str) -> str:
@@ -26,8 +28,31 @@ ENABLE_SCHEMA_LOG = _as_bool("ENABLE_SCHEMA_LOG", False)
 
 app = FastAPI(title=APP_NAME)
 
+INGEST_REQUESTS_TOTAL = Counter(
+    "ingest_requests_total",
+    "Total telemetry ingest requests accepted by the command API.",
+)
+KAFKA_PUBLISH_SUCCESS_TOTAL = Counter(
+    "kafka_publish_success_total",
+    "Total telemetry events successfully published to Kafka.",
+)
+KAFKA_PUBLISH_FAILURE_TOTAL = Counter(
+    "kafka_publish_failure_total",
+    "Total telemetry events that failed to publish to Kafka.",
+)
+KAFKA_PUBLISH_LATENCY_SECONDS = Histogram(
+    "kafka_publish_latency_seconds",
+    "Latency of Kafka publish operations from the command API.",
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+)
+
 
 producer: Optional[KafkaProducer] = None
+
+Instrumentator(excluded_handlers=["/metrics"], should_group_status_codes=False).instrument(app).expose(
+    app,
+    include_in_schema=False,
+)
 
 
 def _init_producer() -> Optional[KafkaProducer]:
@@ -141,8 +166,10 @@ def _build_kafka_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 async def ingest_telemetry(data: ConnectedCarData):
     global producer
 
+    INGEST_REQUESTS_TOTAL.inc()
     active_producer = _get_producer()
     if not KAFKA_ENABLED or active_producer is None:
+        KAFKA_PUBLISH_FAILURE_TOTAL.inc()
         raise HTTPException(
             status_code=503,
             detail="Kafka producer is not available. Check command service configuration."
@@ -155,16 +182,19 @@ async def ingest_telemetry(data: ConnectedCarData):
     kafka_payload = _build_kafka_message(payload)
 
     try:
-        future = active_producer.send(
-            KAFKA_TOPIC,
-            key=payload["vehicle"]["vehicle_id"],
-            value=kafka_payload,
-        )
-        # 비동기적으로 에러 로깅
-        future.add_errback(lambda exc: print(f"[producer] send error: {exc}"))
-        future.get(timeout=2.0)
+        with KAFKA_PUBLISH_LATENCY_SECONDS.time():
+            future = active_producer.send(
+                KAFKA_TOPIC,
+                key=payload["vehicle"]["vehicle_id"],
+                value=kafka_payload,
+            )
+            # 비동기적으로 에러 로깅
+            future.add_errback(lambda exc: print(f"[producer] send error: {exc}"))
+            future.get(timeout=2.0)
+        KAFKA_PUBLISH_SUCCESS_TOTAL.inc()
         return {"status": "success", "processed_vehicle": payload["vehicle"]["vehicle_id"]}
     except Exception as exc:
+        KAFKA_PUBLISH_FAILURE_TOTAL.inc()
         producer = None
         print(f"[ingest] send failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to publish telemetry event.")

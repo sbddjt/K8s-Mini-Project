@@ -11,10 +11,42 @@ from fastapi import FastAPI, HTTPException, Request, Query, WebSocket, WebSocket
 from fastapi.responses import StreamingResponse
 from pymongo import MongoClient
 from pymongo.collection import Collection
+from prometheus_client import Counter, Gauge
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from database import redis_client
 
 app = FastAPI(title="Connected Car Query API")
+
+QUERY_LIST_REQUESTS_TOTAL = Counter(
+    "query_vehicle_list_requests_total",
+    "Total vehicle list-style query requests handled by the query API.",
+    labelnames=("endpoint",),
+)
+QUERY_DETAIL_REQUESTS_TOTAL = Counter(
+    "query_vehicle_detail_requests_total",
+    "Total vehicle detail and history requests handled by the query API.",
+    labelnames=("endpoint",),
+)
+QUERY_REDIS_FAILURES_TOTAL = Counter(
+    "query_redis_failures_total",
+    "Total Redis read failures observed by the query API.",
+    labelnames=("operation",),
+)
+QUERY_MONGO_FAILURES_TOTAL = Counter(
+    "query_mongo_failures_total",
+    "Total MongoDB read failures observed by the query API.",
+    labelnames=("operation",),
+)
+QUERY_WEBSOCKET_CONNECTIONS = Gauge(
+    "query_websocket_connections_active",
+    "Number of active vehicle websocket subscriptions.",
+)
+
+Instrumentator(excluded_handlers=["/metrics"], should_group_status_codes=False).instrument(app).expose(
+    app,
+    include_in_schema=False,
+)
 
 REDIS_KEY_PATTERN = os.getenv("REDIS_KEY_PATTERN", "vehicle:*:latest")
 REDIS_ACTIVE_IDS_KEY = os.getenv("REDIS_ACTIVE_IDS_KEY", "vehicle:active_ids")
@@ -372,6 +404,7 @@ def get_vehicle_replay(
     bucket_ms: int = Query(default=1000, alias="bucketMs", ge=250, le=10000),
     limit: int = Query(default=180, ge=10, le=600),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="replay").inc()
     collection = _get_mongo_collection()
     if collection is None:
         return {
@@ -392,6 +425,7 @@ def get_vehicle_replay(
         ).sort("created_at", 1).limit(max_docs)
         documents = list(cursor)
     except Exception as exc:
+        QUERY_MONGO_FAILURES_TOTAL.labels(operation="replay").inc()
         raise HTTPException(status_code=503, detail=f"failed to load replay data from MongoDB: {exc}")
 
     if not documents:
@@ -818,6 +852,7 @@ def health() -> Dict[str, Any]:
 
 @app.get("/api/vehicles/ids")
 def list_vehicle_ids() -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="ids").inc()
     ids = sorted(
         {
             _coerce_str(payload.get("vehicle_id"))
@@ -839,6 +874,7 @@ def search_vehicle_ids(
     q: str = Query(default="", alias="q"),
     limit: int = Query(default=20, ge=0, le=100),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="search").inc()
     matches, total_count = _search_vehicle_ids(q, limit)
 
     return {
@@ -865,6 +901,7 @@ def list_vehicles(
     max_lng: Optional[float] = Query(default=None, alias="maxLng"),
     limit: int = Query(default=DEFAULT_LIMIT),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="vehicles").inc()
     normalized_limit = min(max(1, limit), MAX_LIMIT)
     vehicles = _collect_vehicles_from_latest(
         vehicle_id=vehicle_id,
@@ -903,6 +940,7 @@ def list_vehicles_light(
     max_lng: Optional[float] = Query(default=None, alias="maxLng"),
     limit: int = Query(default=DEFAULT_LIMIT),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="list").inc()
     normalized_limit = min(max(1, limit), MAX_LIMIT)
     vehicles = _collect_vehicles_from_latest(
         vehicle_id=vehicle_id,
@@ -945,6 +983,7 @@ def query_vehicles(
     summary: bool = Query(default=True),
     limit: int = Query(default=DEFAULT_LIMIT),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="query").inc()
     normalized_limit = min(max(1, limit), MAX_LIMIT)
 
     if since and since > 0:
@@ -1010,6 +1049,7 @@ def watch_vehicles(
     summary: bool = Query(default=False),
     limit: int = Query(default=DEFAULT_LIMIT),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="watch").inc()
     """
     Conditional query endpoint:
     - since=0 -> current snapshot by filters.
@@ -1078,6 +1118,7 @@ def list_vehicles_compact(
     max_lng: Optional[float] = Query(default=None, alias="maxLng"),
     limit: int = Query(default=DEFAULT_LIMIT),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="compact").inc()
     normalized_limit = min(max(1, limit), MAX_LIMIT)
     vehicles = _collect_vehicles_from_latest(
         vehicle_id=vehicle_id,
@@ -1118,6 +1159,7 @@ def list_vehicles_delta(
     max_lng: Optional[float] = Query(default=None, alias="maxLng"),
     limit: int = Query(default=DEFAULT_LIMIT),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="delta").inc()
     updates, latest_stream_id = _collect_delta_since(since, compact=compact, summary=summary)
     updates = _filter_updates_by(
         updates,
@@ -1159,6 +1201,7 @@ def list_vehicle_changes(
     limit: int = Query(default=DEFAULT_LIMIT),
     summary: bool = Query(default=False),
 ) -> Dict[str, Any]:
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="changes").inc()
     normalized_limit = min(max(1, limit), MAX_LIMIT)
     updates, latest_stream_id = _collect_delta_since(since, compact=compact, summary=summary)
     updates = _filter_updates_by(
@@ -1203,6 +1246,7 @@ async def stream_vehicles(
     heartbeat_ms: int = Query(default=1000),
     max_updates: int = Query(default=1000),
 ):
+    QUERY_LIST_REQUESTS_TOTAL.labels(endpoint="stream").inc()
     async def _generator() -> AsyncGenerator[str, None]:
         current_since = max(0, since)
         snapshot_stream_id = _latest_stream_id()
@@ -1325,6 +1369,7 @@ async def websocket_vehicles(
     min_lng: Optional[float] = Query(default=None, alias="minLng"),
     max_lng: Optional[float] = Query(default=None, alias="maxLng"),
 ):
+    QUERY_WEBSOCKET_CONNECTIONS.inc()
     await websocket.accept()
     current_since = max(0, since)
     try:
@@ -1434,13 +1479,21 @@ async def websocket_vehicles(
 
             await asyncio.sleep(1)
     except WebSocketDisconnect:
+        pass
+    finally:
+        QUERY_WEBSOCKET_CONNECTIONS.dec()
         return
 
 
 @app.get("/api/vehicles/{vehicle_id}")
 def get_vehicle(vehicle_id: str) -> Dict[str, Any]:
+    QUERY_DETAIL_REQUESTS_TOTAL.labels(endpoint="vehicle").inc()
     key = f"vehicle:{vehicle_id}:latest"
-    raw_value = redis_client.get(key)
+    try:
+        raw_value = redis_client.get(key)
+    except Exception as exc:
+        QUERY_REDIS_FAILURES_TOTAL.labels(operation="vehicle_get").inc()
+        raise HTTPException(status_code=503, detail=f"redis read failed: {exc}")
     if not raw_value:
         raise HTTPException(status_code=404, detail="vehicle not found")
 
@@ -1457,11 +1510,13 @@ def get_vehicle_history(
     since: int = Query(default=0, alias="since"),
     limit: int = Query(default=20),
 ) -> Dict[str, Any]:
+    QUERY_DETAIL_REQUESTS_TOTAL.labels(endpoint="history").inc()
     max_limit = min(max(1, limit), 500)
 
     try:
         entries = redis_client.xrevrange(VEHICLE_UPDATE_STREAM, count=1000)
     except Exception:
+        QUERY_REDIS_FAILURES_TOTAL.labels(operation="history").inc()
         return {"vehicle_id": vehicle_id, "count": 0, "history": []}
 
     history: List[Dict[str, Any]] = []

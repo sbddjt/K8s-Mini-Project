@@ -7,8 +7,30 @@ from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 from pymongo import MongoClient
 from pymongo.errors import BulkWriteError, OperationFailure
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 RUNNING = True
+MONGO_CONSUMER_MESSAGES_TOTAL = Counter(
+    "mongo_consumer_messages_total",
+    "Total Kafka messages processed by the MongoDB consumer.",
+)
+MONGO_CONSUMER_BATCHES_TOTAL = Counter(
+    "mongo_consumer_batches_total",
+    "Total MongoDB consumer batches attempted.",
+)
+MONGO_INSERT_FAILURES_TOTAL = Counter(
+    "mongo_insert_failures_total",
+    "Total MongoDB consumer insert failures.",
+)
+MONGO_BATCH_INSERT_SECONDS = Histogram(
+    "mongo_batch_insert_seconds",
+    "Latency of MongoDB batch inserts from the command consumer.",
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+)
+MONGO_CONSUMER_UP = Gauge(
+    "mongo_consumer_up",
+    "Whether the MongoDB consumer main loop is running.",
+)
 
 
 def _handle_sigterm(signum, frame):
@@ -53,6 +75,7 @@ def start_consumer():
     bootstrap = os.getenv("KAFKA_BROKERS", os.getenv("KAFKA_BOOTSTRAP", "kafka-svc:9092"))
     group_id = os.getenv("KAFKA_GROUP_ID", "vehicle-mongo-saver")
     batch_size = int(os.getenv("MONGO_BATCH_SIZE", "500"))
+    metrics_port = int(os.getenv("METRICS_PORT", "9101"))
 
     mongo_uri = os.getenv("MONGO_URI", "mongodb://mongo-svc:27017")
     mongo_db_name = os.getenv("MONGO_DB", "car_db")
@@ -60,6 +83,9 @@ def start_consumer():
 
     mongo_client = None
     consumer = None
+
+    start_http_server(metrics_port)
+    print(f"[INFO] MongoDB consumer metrics exposed on :{metrics_port}/metrics")
 
     try:
         mongo_client = MongoClient(mongo_uri)
@@ -93,6 +119,7 @@ def start_consumer():
         return
 
     try:
+        MONGO_CONSUMER_UP.set(1)
         while RUNNING:
             records = consumer.poll(timeout_ms=1000, max_records=batch_size)
 
@@ -121,17 +148,23 @@ def start_consumer():
                 continue
 
             try:
-                collection.insert_many(batch_documents)
+                MONGO_CONSUMER_MESSAGES_TOTAL.inc(len(batch_documents))
+                MONGO_CONSUMER_BATCHES_TOTAL.inc()
+                with MONGO_BATCH_INSERT_SECONDS.time():
+                    collection.insert_many(batch_documents)
                 consumer.commit()
                 print(f"[INFO] MongoDB insert + Kafka offset commit: {len(batch_documents)} rows")
             except BulkWriteError as bwe:
+                MONGO_INSERT_FAILURES_TOTAL.inc()
                 print(f"[ERROR] MongoDB bulk write failed: {bwe.details}")
             except Exception as e:
+                MONGO_INSERT_FAILURES_TOTAL.inc()
                 print(f"[ERROR] MongoDB write failed: {e}")
 
     except KafkaError as e:
         print(f"[ERROR] Kafka error: {e}")
     finally:
+        MONGO_CONSUMER_UP.set(0)
         if consumer is not None:
             consumer.close()
         if mongo_client is not None:

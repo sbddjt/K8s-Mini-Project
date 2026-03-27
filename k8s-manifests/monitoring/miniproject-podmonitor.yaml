@@ -11,11 +11,10 @@ spec:
     matchNames:
       - miniproject
   selector:
-    matchExpressions:
-      - key: app
-        operator: Exists
+    matchLabels:
+      tier: worker
   podMetricsEndpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       interval: 15s
       scrapeTimeout: 10s

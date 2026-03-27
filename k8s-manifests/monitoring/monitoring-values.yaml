@@ -1,4 +1,10 @@
 ﻿grafana:
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: monitoring
   grafana.ini:
     server:
       root_url: "http://192.168.202.243:50031/grafana/"
@@ -6,6 +12,8 @@
 
 prometheus:
   prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
     externalUrl: "http://192.168.202.243:50031/prometheus"
     routePrefix: "/prometheus"
 

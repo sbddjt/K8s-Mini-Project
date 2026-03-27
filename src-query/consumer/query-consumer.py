@@ -8,9 +8,35 @@ from typing import Any, Dict
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 from database import redis_client
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 RUNNING = True
 LAST_CURSOR_TS = 0
+QUERY_CONSUMER_MESSAGES_TOTAL = Counter(
+  "query_consumer_messages_total",
+  "Total Kafka messages processed by the query consumer."
+)
+QUERY_CONSUMER_BATCHES_TOTAL = Counter(
+  "query_consumer_batches_total",
+  "Total query-consumer poll batches that produced updates."
+)
+REDIS_PROJECTION_UPDATES_TOTAL = Counter(
+  "redis_projection_updates_total",
+  "Total vehicle snapshots projected into Redis."
+)
+REDIS_PROJECTION_FAILURES_TOTAL = Counter(
+  "redis_projection_failures_total",
+  "Total Redis projection failures in the query consumer."
+)
+REDIS_PROJECTION_SECONDS = Histogram(
+  "redis_projection_seconds",
+  "Latency of projecting vehicle updates into Redis.",
+  buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5)
+)
+QUERY_CONSUMER_UP = Gauge(
+  "query_consumer_up",
+  "Whether the query consumer main loop is running."
+)
 
 
 def _get_float(value, default=0.0):
@@ -169,8 +195,11 @@ def start_consumer():
   stream_maxlen = int(os.getenv("VEHICLE_UPDATE_STREAM_MAXLEN", "5000"))
   active_ids_key = os.getenv("REDIS_ACTIVE_IDS_KEY", "vehicle:active_ids")
   active_ids_lex_key = os.getenv("REDIS_ACTIVE_IDS_LEX_KEY", "vehicle:active_ids:lex")
+  metrics_port = int(os.getenv("METRICS_PORT", "9102"))
 
   consumer = None
+  start_http_server(metrics_port)
+  print(f"[INFO] Query consumer metrics exposed on :{metrics_port}/metrics")
 
   while RUNNING:
     try:
@@ -192,6 +221,7 @@ def start_consumer():
     return
 
   try:
+    QUERY_CONSUMER_UP.set(1)
     while RUNNING:
       records = consumer.poll(timeout_ms=poll_timeout_ms, max_records=batch_size)
       updated = 0
@@ -199,6 +229,7 @@ def start_consumer():
       for _, msgs in records.items():
         for msg in msgs:
           try:
+            QUERY_CONSUMER_MESSAGES_TOTAL.inc()
             vehicle_data = msg.value
             if not isinstance(vehicle_data, dict):
               continue
@@ -221,9 +252,10 @@ def start_consumer():
               latest_payload["event_ts"] = source_event_ts
             latest_payload["projected_at_ms"] = cursor_ts
 
-            redis_client.set(key, json.dumps(latest_payload), ex=ttl_sec)
-            redis_client.zadd(active_ids_key, {vehicle_id: cursor_ts})
-            redis_client.zadd(active_ids_lex_key, {vehicle_id: 0})
+            with REDIS_PROJECTION_SECONDS.time():
+              redis_client.set(key, json.dumps(latest_payload), ex=ttl_sec)
+              redis_client.zadd(active_ids_key, {vehicle_id: cursor_ts})
+              redis_client.zadd(active_ids_lex_key, {vehicle_id: 0})
 
             snapshot = _build_snapshot(latest_payload)
             if snapshot.get("vehicle_id"):
@@ -234,17 +266,21 @@ def start_consumer():
                 "cursor_ts": str(cursor_ts),
               }
               redis_client.xadd(update_stream, payload, maxlen=stream_maxlen, approximate=True)
+            REDIS_PROJECTION_UPDATES_TOTAL.inc()
             updated += 1
           except Exception as e:
+            REDIS_PROJECTION_FAILURES_TOTAL.inc()
             print(f"[ERROR] processing failed: {e}")
 
       if updated > 0:
+        QUERY_CONSUMER_BATCHES_TOTAL.inc()
         consumer.commit()
         print(f"[INFO] Redis latest key update + offset commit: {updated} rows")
 
   except KafkaError as e:
     print(f"[ERROR] Kafka error: {e}")
   finally:
+    QUERY_CONSUMER_UP.set(0)
     if consumer is not None:
       consumer.close()
     print("[INFO] Kafka Consumer stopped")
