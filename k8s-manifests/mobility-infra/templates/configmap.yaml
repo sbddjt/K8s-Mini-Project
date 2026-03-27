@@ -37,5 +37,8 @@ data:
   FRONTEND_QUERY_API_URL: "/api"
   QUERY_API_URL: "http://connected-car-query-svc"
 
+  # --- Ingest API ---
+  KAFKA_ENABLED: "true"
+
   # --- Dummy Data Server ---
-  INGEST_SERVER_URL: "http://connected-car-command-svc/api/query/telemetry"
+  INGEST_SERVER_URL: "http://connected-car-command-svc/api/telemetry/batch"

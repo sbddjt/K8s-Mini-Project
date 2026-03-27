@@ -31,7 +31,7 @@ spec:
                 name: connected-car-frontend-svc
                 port:
                   number: 80
-          - path: /api/query/telemetry
+          - path: /api/telemetry
             pathType: Prefix
             backend:
               service:

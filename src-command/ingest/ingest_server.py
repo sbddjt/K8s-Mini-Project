@@ -1,14 +1,17 @@
 import json
 import os
+import asyncio
 from datetime import datetime, timezone
+from aiokafka import AIOKafkaProducer
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
-from kafka import KafkaProducer
 from pydantic import BaseModel
-from prometheus_client import Counter, Histogram
-from prometheus_fastapi_instrumentator import Instrumentator
+import logging
 
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def _get_env(name: str, default: str) -> str:
     return os.getenv(name, default).strip()
@@ -23,69 +26,44 @@ APP_NAME = "Connected Car Ingest API"
 KAFKA_BROKERS = _get_env("KAFKA_BROKERS", "localhost:9092")
 KAFKA_TOPIC = _get_env("KAFKA_TOPIC", "car.telemetry.events")
 KAFKA_CLIENT_ID = _get_env("KAFKA_CLIENT_ID", "command-api-producer")
-KAFKA_ENABLED = _as_bool("KAFKA_ENABLED", True)
+KAFKA_ENABLED = _as_bool("KAFKA_ENABLED", False) # 로컬 테스트용으로 False
 ENABLE_SCHEMA_LOG = _as_bool("ENABLE_SCHEMA_LOG", False)
 
 app = FastAPI(title=APP_NAME)
 
-INGEST_REQUESTS_TOTAL = Counter(
-    "ingest_requests_total",
-    "Total telemetry ingest requests accepted by the command API.",
-)
-KAFKA_PUBLISH_SUCCESS_TOTAL = Counter(
-    "kafka_publish_success_total",
-    "Total telemetry events successfully published to Kafka.",
-)
-KAFKA_PUBLISH_FAILURE_TOTAL = Counter(
-    "kafka_publish_failure_total",
-    "Total telemetry events that failed to publish to Kafka.",
-)
-KAFKA_PUBLISH_LATENCY_SECONDS = Histogram(
-    "kafka_publish_latency_seconds",
-    "Latency of Kafka publish operations from the command API.",
-    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
-)
+# 전역 비동기 카프카 프로듀서
+producer: Optional[AIOKafkaProducer] = None
 
-
-producer: Optional[KafkaProducer] = None
-
-Instrumentator(excluded_handlers=["/metrics"], should_group_status_codes=False).instrument(app).expose(
-    app,
-    include_in_schema=False,
-)
-
-
-def _init_producer() -> Optional[KafkaProducer]:
-    if not KAFKA_ENABLED:
-        return None
-
-    try:
-        initialized = KafkaProducer(
-            bootstrap_servers=[s.strip() for s in KAFKA_BROKERS.split(",") if s.strip()],
-            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-            key_serializer=lambda v: v.encode("utf-8") if isinstance(v, str) else None,
-            acks="all",
-            retries=5,
-            client_id=KAFKA_CLIENT_ID,
-        )
-        print(f"[producer] initialized: brokers={KAFKA_BROKERS}, topic={KAFKA_TOPIC}")
-        return initialized
-    except Exception as exc:
-        print(f"[producer] init failed: {exc}")
-        return None
-
-
-def _get_producer() -> Optional[KafkaProducer]:
+@app.on_event("startup")
+async def startup_event():
     global producer
+    if KAFKA_ENABLED:
+        try:
+            producer = AIOKafkaProducer(
+                bootstrap_servers = [s.strip() for s in KAFKA_BROKERS.split(",") if s.strip()],
+                value_serializer = lambda v : json.dumps(v).encode("utf-8"),
+                key_serializer = lambda v : v.encode("utf-8") if isinstance(v, str) else None,
+                acks = "all",
+                client_id = KAFKA_CLIENT_ID,
+                compression_type = "gzip" # 압축 추가
+            )
 
-    if producer is not None:
-        return producer
+            await producer.start() # 비동기로 연결 시작
+            print(f"[AIOKafkaProducer] started: brokers = {KAFKA_BROKERS}")
+        
+        except Exception as exc:
+            print(f"[AIOKafkaProducer] init failed : {exc}")
+            producer = None
+    
+    else:
+        logger.info(" Kafka disabled - running in local test mode")
 
-    producer = _init_producer()
-    return producer
-
-
-producer = _init_producer()
+@app.on_event("shutdown")
+async def shutdown_event():
+    global producer
+    if producer:
+        await producer.stop()
+        logger.info("AIOKafkaProducer stopped")
 
 
 class VehicleInfo(BaseModel):
@@ -93,7 +71,7 @@ class VehicleInfo(BaseModel):
     vin: str
     model: str
     driver: str
-    timestamp_utc: str
+    timestamp: str
 
 
 class Coordinates(BaseModel):
@@ -140,6 +118,7 @@ class ConnectedCarData(BaseModel):
 
 
 def _build_kafka_message(payload: Dict[str, Any]) -> Dict[str, Any]:
+    # 원본 데이터를 Kafka 메시지 포맷으로 변환
     vehicle = payload["vehicle"]
     location = payload["location"]["coordinates"]
     trip = payload["trip"]
@@ -148,7 +127,7 @@ def _build_kafka_message(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "vehicle_id": vehicle["vehicle_id"],
-        "timestamp": vehicle["timestamp_utc"],
+        "timestamp": vehicle["timestamp"],
         "received_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "state": trip.get("state"),
         "speed_kmh": trip.get("speed_kmh"),
@@ -161,51 +140,107 @@ def _build_kafka_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         "raw": payload,
     }
 
+async def _send_to_kafka(data_list: List[Dict[str, Any]]) -> int:
+    # Kafka로 데이터 전송
+    if not KAFKA_ENABLED:
+        # 로컬 테스트 모드: 로그만 출력하고 성공 처리
+        logger.info(f"[LOCAL MODE] Would send {len(data_list)} messages to Kafka")
+        if ENABLE_SCHEMA_LOG and data_list:
+            logger.debug(f"Sample payload: {json.dumps(data_list[0], ensure_ascii=False)[:300]}")
+        return len(data_list)
 
-@app.post("/api/query/telemetry")
-async def ingest_telemetry(data: ConnectedCarData):
-    global producer
+    if producer is None:
+        # Kafka 활성화됐는데 producer가 없으면 → 503 반환해서 dummy 버퍼가 재시도하도록
+        raise HTTPException(status_code=503, detail="Kafka producer not available")
 
-    INGEST_REQUESTS_TOTAL.inc()
-    active_producer = _get_producer()
-    if not KAFKA_ENABLED or active_producer is None:
-        KAFKA_PUBLISH_FAILURE_TOTAL.inc()
-        raise HTTPException(
-            status_code=503,
-            detail="Kafka producer is not available. Check command service configuration."
+    # Kafka 전송
+    tasks = []
+    for data in data_list:
+        kafka_payload = _build_kafka_message(data)
+
+        if ENABLE_SCHEMA_LOG:
+            logger.debug(f"Sending to Kafka: {kafka_payload['vehicle_id']} @ {kafka_payload['timestamp']}")
+
+        tasks.append(
+            producer.send_and_wait(
+                KAFKA_TOPIC,
+                key = kafka_payload["vehicle_id"],
+                value = kafka_payload
+            )
         )
 
-    payload = data.model_dump()
-    if ENABLE_SCHEMA_LOG:
-        print("[ingest] payload:", json.dumps(payload, ensure_ascii=False)[:500])
-
-    kafka_payload = _build_kafka_message(payload)
-
     try:
-        with KAFKA_PUBLISH_LATENCY_SECONDS.time():
-            future = active_producer.send(
-                KAFKA_TOPIC,
-                key=payload["vehicle"]["vehicle_id"],
-                value=kafka_payload,
-            )
-            # 비동기적으로 에러 로깅
-            future.add_errback(lambda exc: print(f"[producer] send error: {exc}"))
-            future.get(timeout=2.0)
-        KAFKA_PUBLISH_SUCCESS_TOTAL.inc()
-        return {"status": "success", "processed_vehicle": payload["vehicle"]["vehicle_id"]}
+        await asyncio.gather(*tasks)
+        logger.info(f"Sent {len(data_list)} messages to Kafka Topic '{KAFKA_TOPIC}'")
+        return len(data_list)
+    
     except Exception as exc:
-        KAFKA_PUBLISH_FAILURE_TOTAL.inc()
-        producer = None
-        print(f"[ingest] send failed: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to publish telemetry event.")
+        logger.error(f"(X) Kafka send failed: {exc}")
+        raise HTTPException(
+            status_code = 500,
+            detail = f"Failed to publish telemetry events to Kafka: {str(exc)}"
+        )
+    
+@app.post("/api/telemetry/batch")
+async def ingest_telemetry_batch(data_list: List[ConnectedCarData]):
+    # 배치 텔레메트리 수신 (단일 데이터도 리스트로 받음)
+
+    if not data_list:
+        raise HTTPException(status_code = 400, detail = "Empty data list")
+    
+    # Pydantic 모델을 딕셔너리로 변환
+    payloads = [data.model_dump() for data in data_list]
+
+    # Kafka로 전송
+    processed_count = await _send_to_kafka(payloads)
+
+    # 응답
+    vehicle_ids = [p["vehicle"]["vehicle_id"] for p in payloads]
+
+    return {
+        "status": "success",
+        "processed_count": processed_count,
+        "vehicle_ids": vehicle_ids[:10] if len(vehicle_ids) > 10 else vehicle_ids,
+        "kafka_enabled": KAFKA_ENABLED,
+    }
+
+@app.post("/api/telemetry")
+async def ingest_telemetry_single(data: ConnectedCarData):
+    # 단일 텔레메트리 수신 (하위 호환성용)
+    # 내부적으론 배치 엔드포인트 호출
+
+    result = await ingest_telemetry_batch([data])
+
+    return {
+        "status" : "success",
+        "processed_vehicle" : data.vehicle.vehicle_id,
+        "kafka_enabled": KAFKA_ENABLED,
+    }
 
 
 @app.get("/health")
 async def health_check():
+    kafka_status = "connected" if (KAFKA_ENABLED and producer) else "disabled"
+
     return {
         "status": "ok",
         "service": APP_NAME,
         "kafka_enabled": KAFKA_ENABLED,
-        "kafka_topic": KAFKA_TOPIC,
-        "kafka_brokers": KAFKA_BROKERS,
+        "kafka_status" : kafka_status,
+        "kafka_topic": KAFKA_TOPIC if KAFKA_ENABLED else "N/A",
+        "kafka_brokers": KAFKA_BROKERS if KAFKA_ENABLED else "N/A",
+    }
+
+@app.get("/")
+async def root():
+    # API 정보
+    return {
+        "service": APP_NAME,
+        "version": "1.0.0",
+        "endpoints": {
+            "batch": "/api/telemetry/batch",
+            "single": "/api/telemetry",
+            "health": "/health"
+        },
+        "kafka_enabled": KAFKA_ENABLED,
     }

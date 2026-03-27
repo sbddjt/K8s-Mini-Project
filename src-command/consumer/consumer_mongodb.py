@@ -151,7 +151,7 @@ def start_consumer():
                 MONGO_CONSUMER_MESSAGES_TOTAL.inc(len(batch_documents))
                 MONGO_CONSUMER_BATCHES_TOTAL.inc()
                 with MONGO_BATCH_INSERT_SECONDS.time():
-                    collection.insert_many(batch_documents)
+                    collection.insert_many(batch_documents, ordered=False)
                 consumer.commit()
                 print(f"[INFO] MongoDB insert + Kafka offset commit: {len(batch_documents)} rows")
             except BulkWriteError as bwe:
