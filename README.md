@@ -1,4 +1,4 @@
-# ☁️ K8s Mini Project
+# ☁️ Connected Car Telemetry
 
 **현대오토에버 모빌리티스쿨 클라우드트랙 3기** 쿠버네티스 미니프로젝트 작업 공간입니다.
 
